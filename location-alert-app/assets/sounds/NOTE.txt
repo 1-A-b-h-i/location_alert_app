@@ -1,0 +1,18 @@
+ALARM SOUND PLACEHOLDER
+
+To use a real alarm sound:
+1. Download an alarm or alert sound file in MP3 format
+2. Rename it to "alarm.mp3"
+3. Place it in this directory (assets/sounds/)
+
+The sound should be:
+- Clear and distinctive
+- Not too long (ideally 1-3 seconds for a repeating sound)
+- Appropriate volume level
+
+Royalty-free sound effects can be found on websites like:
+- soundsnap.com
+- freesound.org
+- zapsplat.com
+
+Note: For testing purposes, you may want to use a gentler sound to avoid startling yourself during development. 
