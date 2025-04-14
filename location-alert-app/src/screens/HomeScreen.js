@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import MapView, { Marker, Circle } from 'react-native-maps';
 import locationService from '../services/LocationService';
+import Ionicons from 'react-native-vector-icons/Ionicons';
 
 const HomeScreen = ({ navigation }) => {
   const [currentLocation, setCurrentLocation] = useState(null);
@@ -18,6 +19,8 @@ const HomeScreen = ({ navigation }) => {
   const [distance, setDistance] = useState(null);
   const [isTracking, setIsTracking] = useState(false);
   const [isAlarmActive, setIsAlarmActive] = useState(false);
+  const [destinationReached, setDestinationReached] = useState(false);
+  const [isSavedLocation, setIsSavedLocation] = useState(false);
 
   useEffect(() => {
     // Request permissions and start location tracking when component mounts
@@ -25,6 +28,13 @@ const HomeScreen = ({ navigation }) => {
       const success = await locationService.startLocationTracking(locationData => {
         setCurrentLocation(locationData.currentLocation);
         setDistance(locationData.distance);
+        
+        // Check if we've reached the destination (within 50 meters)
+        if (locationData.distance !== null && locationData.distance <= 0.05) {
+          setDestinationReached(true);
+        } else {
+          setDestinationReached(false);
+        }
       });
       setIsTracking(success);
     };
@@ -50,6 +60,7 @@ const HomeScreen = ({ navigation }) => {
       if (locationService.destinationLocation) {
         setDestinationLocation(locationService.destinationLocation);
         setDestinationName(locationService.destinationName);
+        checkIfDestinationIsSaved();
       }
       setIsAlarmActive(locationService.isAlarmPlaying);
     });
@@ -58,17 +69,71 @@ const HomeScreen = ({ navigation }) => {
     if (locationService.destinationLocation) {
       setDestinationLocation(locationService.destinationLocation);
       setDestinationName(locationService.destinationName);
+      checkIfDestinationIsSaved();
     }
 
     return unsubscribe;
   }, [navigation]);
 
+  const checkIfDestinationIsSaved = () => {
+    if (!locationService.destinationLocation) {
+      setIsSavedLocation(false);
+      return;
+    }
+
+    const savedLocations = locationService.getSavedLocations();
+    const isAlreadySaved = savedLocations.some(loc => 
+      Math.abs(loc.latitude - locationService.destinationLocation.latitude) < 0.0001 && 
+      Math.abs(loc.longitude - locationService.destinationLocation.longitude) < 0.0001
+    );
+    
+    setIsSavedLocation(isAlreadySaved);
+  };
+
   const handleSetDestination = () => {
     navigation.navigate('SetDestination');
   };
 
-  const handleOpenSettings = () => {
-    navigation.navigate('Settings');
+  const handleClearDestination = () => {
+    locationService.clearDestination();
+    setDestinationLocation(null);
+    setDestinationName(null);
+    setDistance(null);
+    setDestinationReached(false);
+    setIsSavedLocation(false);
+  };
+
+  const handleSaveDestination = async () => {
+    if (!destinationLocation) return;
+    
+    try {
+      await locationService.saveLocation(destinationLocation, destinationName);
+      setIsSavedLocation(true);
+      Alert.alert("Success", "Location saved to your favorites!");
+    } catch (error) {
+      console.error("Error saving location:", error);
+      Alert.alert("Error", "Failed to save location. Please try again.");
+    }
+  };
+
+  const handleMarkAsReached = () => {
+    Alert.alert(
+      "Destination Reached",
+      `You've reached ${destinationName}! Would you like to clear this destination?`,
+      [
+        {
+          text: "Keep Tracking",
+          style: "cancel"
+        },
+        {
+          text: "Clear Destination",
+          onPress: async () => {
+            await locationService.markDestinationReached();
+            handleClearDestination();
+          }
+        }
+      ]
+    );
   };
 
   const getStatusColor = () => {
@@ -106,12 +171,23 @@ const HomeScreen = ({ navigation }) => {
             <Text style={styles.destinationNameText}>
               {destinationName}
             </Text>
+            {!isSavedLocation && (
+              <TouchableOpacity
+                style={styles.saveLocationButton}
+                onPress={handleSaveDestination}
+              >
+                <Ionicons name="bookmark-outline" size={20} color="white" />
+              </TouchableOpacity>
+            )}
           </View>
         )}
         
-        <View style={[styles.statusContainer, isAlarmActive && styles.alarmActiveContainer]}>
-          <Text style={[styles.statusText, { color: isAlarmActive ? '#fff' : getStatusColor() }]}>
-            {getStatusText()}
+        <View style={[styles.statusContainer, isAlarmActive && styles.alarmActiveContainer, 
+          destinationReached && styles.destinationReachedContainer]}>
+          <Text style={[styles.statusText, { 
+            color: isAlarmActive ? '#fff' : destinationReached ? '#fff' : getStatusColor() 
+          }]}>
+            {destinationReached ? `You've reached ${destinationName}!` : getStatusText()}
           </Text>
           
           {isAlarmActive && (
@@ -120,6 +196,15 @@ const HomeScreen = ({ navigation }) => {
               onPress={stopAlarm}
             >
               <Text style={styles.stopAlarmText}>STOP ALARM</Text>
+            </TouchableOpacity>
+          )}
+
+          {destinationReached && (
+            <TouchableOpacity 
+              style={styles.markReachedButton}
+              onPress={handleMarkAsReached}
+            >
+              <Text style={styles.markReachedText}>MARK AS REACHED</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -196,48 +281,74 @@ const HomeScreen = ({ navigation }) => {
           )}
         </View>
 
-        <View style={styles.buttonContainer}>
+        <View style={styles.actionButtonsContainer}>
           <TouchableOpacity
-            style={styles.button}
+            style={styles.mainActionButton}
             onPress={handleSetDestination}
           >
-            <Text style={styles.buttonText}>
+            <Ionicons 
+              name={destinationLocation ? "location" : "location-outline"} 
+              size={22} 
+              color="white" 
+            />
+            <Text style={styles.mainActionText}>
               {destinationLocation ? 'Change Destination' : 'Set Destination'}
             </Text>
           </TouchableOpacity>
-        </View>
 
-        <View style={styles.buttonContainer}>
-          <TouchableOpacity
-            style={[styles.button, styles.settingsButton]}
-            onPress={handleOpenSettings}
-          >
-            <Text style={styles.buttonText}>Settings</Text>
-          </TouchableOpacity>
+          {destinationLocation && (
+            <TouchableOpacity
+              style={[styles.mainActionButton, styles.clearButton]}
+              onPress={handleClearDestination}
+            >
+              <Ionicons name="close-circle-outline" size={22} color="white" />
+              <Text style={styles.mainActionText}>Clear Destination</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {destinationLocation && (
           <View style={styles.infoContainer}>
-            <Text style={styles.infoText}>
-              Destination coordinates: {destinationLocation.latitude.toFixed(4)}, {destinationLocation.longitude.toFixed(4)}
-            </Text>
-            <Text style={styles.infoText}>
-              Alert thresholds:
-            </Text>
-            <Text style={styles.infoText}>
-              • First alerts at {locationService.notificationThresholds.far.threshold}km (every 500m)
-            </Text>
-            <Text style={styles.infoText}>
-              • Medium alerts at {locationService.notificationThresholds.mid.threshold}km (every 200m)
-            </Text>
-            <Text style={styles.infoText}>
-              • Close alerts at {locationService.notificationThresholds.near.threshold}km (every 100m)
-            </Text>
-            {locationService.alarmEnabled && (
-              <Text style={styles.alarmInfoText}>
-                • Continuous alarm at {locationService.alarmDistance}km
-              </Text>
-            )}
+            <Text style={styles.infoTitle}>Alert Information</Text>
+            <View style={styles.infoContent}>
+              <View style={styles.infoItem}>
+                <View style={[styles.infoIconCircle, { backgroundColor: '#2196F3' }]}>
+                  <Ionicons name="notifications-outline" size={16} color="white" />
+                </View>
+                <Text style={styles.infoText}>
+                  First alerts at {locationService.notificationThresholds.far.threshold}km
+                </Text>
+              </View>
+              
+              <View style={styles.infoItem}>
+                <View style={[styles.infoIconCircle, { backgroundColor: '#FFC107' }]}>
+                  <Ionicons name="notifications-outline" size={16} color="white" />
+                </View>
+                <Text style={styles.infoText}>
+                  Medium alerts at {locationService.notificationThresholds.mid.threshold}km
+                </Text>
+              </View>
+              
+              <View style={styles.infoItem}>
+                <View style={[styles.infoIconCircle, { backgroundColor: '#4CAF50' }]}>
+                  <Ionicons name="notifications-outline" size={16} color="white" />
+                </View>
+                <Text style={styles.infoText}>
+                  Close alerts at {locationService.notificationThresholds.near.threshold}km
+                </Text>
+              </View>
+              
+              {locationService.alarmEnabled && (
+                <View style={styles.infoItem}>
+                  <View style={[styles.infoIconCircle, { backgroundColor: '#F44336' }]}>
+                    <Ionicons name="alarm-outline" size={16} color="white" />
+                  </View>
+                  <Text style={styles.alarmInfoText}>
+                    Continuous alarm at {locationService.alarmDistance}km
+                  </Text>
+                </View>
+              )}
+            </View>
           </View>
         )}
       </ScrollView>
@@ -248,7 +359,7 @@ const HomeScreen = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#f5f5f5',
   },
   scrollContainer: {
     flexGrow: 1,
@@ -256,42 +367,79 @@ const styles = StyleSheet.create({
   },
   destinationNameContainer: {
     backgroundColor: '#2196F3',
-    padding: 15,
-    borderRadius: 8,
-    marginBottom: 12,
+    padding: 16,
+    borderRadius: 10,
+    marginBottom: 16,
     alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
   },
   destinationNameText: {
     fontSize: 20,
     fontWeight: 'bold',
     color: 'white',
-    textAlign: 'center',
+    flex: 1,
+  },
+  saveLocationButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 10,
   },
   statusContainer: {
-    backgroundColor: '#f8f8f8',
-    padding: 15,
-    borderRadius: 8,
+    backgroundColor: '#fff',
+    padding: 16,
+    borderRadius: 10,
     marginBottom: 16,
     alignItems: 'center',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
   },
   alarmActiveContainer: {
     backgroundColor: '#f44336',
-    paddingVertical: 15,
-    paddingHorizontal: 15,
+  },
+  destinationReachedContainer: {
+    backgroundColor: '#4CAF50',
   },
   statusText: {
     fontSize: 16,
     fontWeight: 'bold',
+    textAlign: 'center',
   },
   stopAlarmButton: {
     backgroundColor: 'white',
     paddingVertical: 8,
     paddingHorizontal: 15,
-    borderRadius: 4,
-    marginTop: 10,
+    borderRadius: 20,
+    marginTop: 12,
+    elevation: 2,
   },
   stopAlarmText: {
     color: '#f44336',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  markReachedButton: {
+    backgroundColor: 'white',
+    paddingVertical: 8,
+    paddingHorizontal: 15,
+    borderRadius: 20,
+    marginTop: 12,
+    elevation: 2,
+  },
+  markReachedText: {
+    color: '#4CAF50',
     fontWeight: 'bold',
     fontSize: 14,
   },
@@ -300,6 +448,11 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     overflow: 'hidden',
     marginBottom: 16,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
   },
   map: {
     ...StyleSheet.absoluteFillObject,
@@ -310,38 +463,71 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: '#f0f0f0',
   },
-  buttonContainer: {
-    marginVertical: 8,
+  actionButtonsContainer: {
+    marginBottom: 16,
   },
-  button: {
+  mainActionButton: {
     backgroundColor: '#2196F3',
     paddingVertical: 12,
-    borderRadius: 8,
+    borderRadius: 10,
     alignItems: 'center',
+    marginBottom: 10,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    elevation: 2,
+  },
+  mainActionText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16,
+    marginLeft: 8,
+  },
+  clearButton: {
+    backgroundColor: '#F44336',
   },
   settingsButton: {
     backgroundColor: '#FF9800',
   },
-  buttonText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
   infoContainer: {
-    backgroundColor: '#f8f8f8',
-    padding: 15,
-    borderRadius: 8,
-    marginTop: 8,
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    padding: 16,
+    marginBottom: 16,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+  infoTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 12,
+  },
+  infoContent: {
+    
+  },
+  infoItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  infoIconCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
   },
   infoText: {
     fontSize: 14,
     color: '#666',
-    marginBottom: 6,
   },
   alarmInfoText: {
     fontSize: 14,
-    color: '#f44336',
-    marginBottom: 6,
+    color: '#F44336',
     fontWeight: 'bold',
   },
 });

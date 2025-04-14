@@ -14,6 +14,7 @@ import {
 import MapView, { Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
 import locationService from '../services/LocationService';
+import { Ionicons } from '@expo/vector-icons';
 
 // Simplified mock geocoding service since we don't have a real API key
 // In a real app, you would use Google Places API, Mapbox Geocoding, etc.
@@ -52,6 +53,9 @@ const SetDestinationScreen = ({ navigation }) => {
   const [showSearchResults, setShowSearchResults] = useState(false);
   const [destinationName, setDestinationName] = useState('');
   const [showNameModal, setShowNameModal] = useState(false);
+  const [savedLocations, setSavedLocations] = useState([]);
+  const [showSavedLocations, setShowSavedLocations] = useState(false);
+  const [saveToFavorites, setSaveToFavorites] = useState(false);
 
   useEffect(() => {
     // Get initial current location
@@ -87,7 +91,13 @@ const SetDestinationScreen = ({ navigation }) => {
     };
 
     getInitialLocation();
+    loadSavedLocations();
   }, []);
+
+  const loadSavedLocations = () => {
+    const locations = locationService.getSavedLocations();
+    setSavedLocations(locations);
+  };
 
   const handleMapPress = (event) => {
     const { coordinate } = event.nativeEvent;
@@ -98,19 +108,29 @@ const SetDestinationScreen = ({ navigation }) => {
   const handleSaveDestination = () => {
     if (selectedLocation) {
       // Show modal to let user name the destination
+      setSaveToFavorites(false);
       setShowNameModal(true);
     } else {
       Alert.alert('No Destination', 'Please select a destination on the map first.');
     }
   };
 
-  const handleConfirmDestination = () => {
+  const handleConfirmDestination = async () => {
     // Save destination with name
     locationService.setDestination(
       selectedLocation.latitude, 
       selectedLocation.longitude,
       destinationName || 'Selected Location'
     );
+    
+    // If user wants to save to favorites, do that too
+    if (saveToFavorites) {
+      await locationService.saveLocation(
+        selectedLocation,
+        destinationName || 'Selected Location'
+      );
+    }
+    
     setShowNameModal(false);
     navigation.goBack();
   };
@@ -161,6 +181,25 @@ const SetDestinationScreen = ({ navigation }) => {
     }
   };
 
+  const handleSelectSavedLocation = (location) => {
+    setSelectedLocation({
+      latitude: location.latitude,
+      longitude: location.longitude
+    });
+    setDestinationName(location.name);
+    setShowSavedLocations(false);
+    
+    // Animate map to the selected location
+    if (mapRef && mapRef.current) {
+      mapRef.current.animateToRegion({
+        latitude: location.latitude,
+        longitude: location.longitude,
+        latitudeDelta: 0.05,
+        longitudeDelta: 0.05,
+      }, 1000);
+    }
+  };
+
   const mapRef = React.useRef(null);
 
   return (
@@ -174,36 +213,80 @@ const SetDestinationScreen = ({ navigation }) => {
           onSubmitEditing={handleSearch}
         />
         <TouchableOpacity style={styles.searchButton} onPress={handleSearch}>
-          <Text style={styles.searchButtonText}>Search</Text>
+          <Ionicons name="search" size={20} color="white" />
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.searchButton, { backgroundColor: '#4CAF50' }]} 
+          onPress={() => setShowSavedLocations(!showSavedLocations)}
+        >
+          <Ionicons name="bookmark" size={20} color="white" />
         </TouchableOpacity>
       </View>
 
-      {/* Search Results Modal */}
+      {/* Search Results Panel */}
       {showSearchResults && (
-        <View style={styles.searchResultsContainer}>
+        <View style={styles.resultsPanel}>
+          <View style={styles.panelHeader}>
+            <Text style={styles.panelHeaderText}>Search Results</Text>
+            <TouchableOpacity onPress={() => setShowSearchResults(false)}>
+              <Ionicons name="close" size={24} color="#666" />
+            </TouchableOpacity>
+          </View>
           <FlatList
             data={searchResults}
             keyExtractor={(item, index) => `location-${index}`}
             renderItem={({ item }) => (
               <TouchableOpacity 
-                style={styles.searchResultItem}
+                style={styles.resultItem}
                 onPress={() => handleSelectSearchResult(item)}
               >
-                <Text style={styles.searchResultText}>{item.name}</Text>
-                <Text style={styles.searchResultCoords}>
-                  {item.latitude.toFixed(4)}, {item.longitude.toFixed(4)}
-                </Text>
+                <Ionicons name="location-outline" size={20} color="#2196F3" style={styles.resultIcon} />
+                <View style={styles.resultTextContainer}>
+                  <Text style={styles.resultName}>{item.name}</Text>
+                  <Text style={styles.resultCoords}>
+                    {item.latitude.toFixed(4)}, {item.longitude.toFixed(4)}
+                  </Text>
+                </View>
               </TouchableOpacity>
             )}
-            ListHeaderComponent={
-              <View style={styles.searchResultHeader}>
-                <Text style={styles.searchResultHeaderText}>Search Results</Text>
-                <TouchableOpacity onPress={() => setShowSearchResults(false)}>
-                  <Text style={styles.closeButton}>Close</Text>
-                </TouchableOpacity>
-              </View>
-            }
           />
+        </View>
+      )}
+
+      {/* Saved Locations Panel */}
+      {showSavedLocations && (
+        <View style={styles.resultsPanel}>
+          <View style={styles.panelHeader}>
+            <Text style={styles.panelHeaderText}>Saved Locations</Text>
+            <TouchableOpacity onPress={() => setShowSavedLocations(false)}>
+              <Ionicons name="close" size={24} color="#666" />
+            </TouchableOpacity>
+          </View>
+          {savedLocations.length > 0 ? (
+            <FlatList
+              data={savedLocations}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item }) => (
+                <TouchableOpacity 
+                  style={styles.resultItem}
+                  onPress={() => handleSelectSavedLocation(item)}
+                >
+                  <Ionicons name="bookmark" size={20} color="#4CAF50" style={styles.resultIcon} />
+                  <View style={styles.resultTextContainer}>
+                    <Text style={styles.resultName}>{item.name}</Text>
+                    <Text style={styles.resultCoords}>
+                      {item.latitude.toFixed(4)}, {item.longitude.toFixed(4)}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              )}
+            />
+          ) : (
+            <View style={styles.emptyResultsContainer}>
+              <Ionicons name="bookmark-outline" size={40} color="#ccc" />
+              <Text style={styles.emptyResultsText}>No saved locations</Text>
+            </View>
+          )}
         </View>
       )}
 
@@ -247,8 +330,9 @@ const SetDestinationScreen = ({ navigation }) => {
       </View>
 
       <View style={styles.instructionContainer}>
+        <Ionicons name="information-circle-outline" size={20} color="#666" style={styles.instructionIcon} />
         <Text style={styles.instructionText}>
-          Tap on the map to select your destination. You can also search for locations or drag the marker to adjust.
+          Tap on the map to select your destination. You can also search for locations or use your saved favorites.
         </Text>
       </View>
 
@@ -258,6 +342,7 @@ const SetDestinationScreen = ({ navigation }) => {
           onPress={handleSaveDestination}
           disabled={!selectedLocation}
         >
+          <Ionicons name="navigate" size={20} color="white" style={styles.buttonIcon} />
           <Text style={styles.buttonText}>Set as Destination</Text>
         </TouchableOpacity>
         
@@ -265,14 +350,16 @@ const SetDestinationScreen = ({ navigation }) => {
           style={[styles.button, styles.cancelButton]}
           onPress={() => navigation.goBack()}
         >
+          <Ionicons name="close-circle-outline" size={20} color="white" style={styles.buttonIcon} />
           <Text style={styles.buttonText}>Cancel</Text>
         </TouchableOpacity>
       </View>
 
       {selectedLocation && (
         <View style={styles.coordinatesContainer}>
+          <Ionicons name="location" size={16} color="#FF5722" style={styles.coordsIcon} />
           <Text style={styles.coordinatesText}>
-            Selected: {destinationName || 'Unnamed Location'} ({selectedLocation.latitude.toFixed(6)}, {selectedLocation.longitude.toFixed(6)})
+            {destinationName || 'Selected Location'} ({selectedLocation.latitude.toFixed(5)}, {selectedLocation.longitude.toFixed(5)})
           </Text>
         </View>
       )}
@@ -295,19 +382,31 @@ const SetDestinationScreen = ({ navigation }) => {
               autoFocus
             />
             
+            <View style={styles.checkboxContainer}>
+              <TouchableOpacity
+                style={styles.checkbox}
+                onPress={() => setSaveToFavorites(!saveToFavorites)}
+              >
+                <View style={[styles.checkboxInner, saveToFavorites && styles.checkboxChecked]}>
+                  {saveToFavorites && <Ionicons name="checkmark" size={16} color="white" />}
+                </View>
+              </TouchableOpacity>
+              <Text style={styles.checkboxLabel}>Save to Favorites</Text>
+            </View>
+            
             <View style={styles.modalButtons}>
               <TouchableOpacity
                 style={[styles.modalButton, styles.cancelModalButton]}
                 onPress={() => setShowNameModal(false)}
               >
-                <Text style={styles.buttonText}>Cancel</Text>
+                <Text style={styles.cancelButtonText}>Cancel</Text>
               </TouchableOpacity>
               
               <TouchableOpacity
                 style={[styles.modalButton, styles.saveModalButton]}
                 onPress={handleConfirmDestination}
               >
-                <Text style={styles.buttonText}>Save</Text>
+                <Text style={styles.saveButtonText}>Save</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -320,7 +419,7 @@ const SetDestinationScreen = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#f5f5f5',
     padding: 16,
   },
   searchContainer: {
@@ -329,27 +428,25 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
-    height: 40,
+    height: 44,
     borderWidth: 1,
     borderColor: '#ddd',
     borderRadius: 8,
-    paddingHorizontal: 10,
-    marginRight: 8,
+    paddingHorizontal: 12,
+    backgroundColor: 'white',
   },
   searchButton: {
     backgroundColor: '#2196F3',
-    paddingHorizontal: 12,
+    width: 44,
+    height: 44,
     justifyContent: 'center',
     alignItems: 'center',
     borderRadius: 8,
+    marginLeft: 8,
   },
-  searchButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-  },
-  searchResultsContainer: {
+  resultsPanel: {
     position: 'absolute',
-    top: 60,
+    top: 70,
     left: 16,
     right: 16,
     maxHeight: 300,
@@ -360,41 +457,62 @@ const styles = StyleSheet.create({
     zIndex: 1000,
     elevation: 5,
   },
-  searchResultHeader: {
+  panelHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#ddd',
-    backgroundColor: '#f8f8f8',
-  },
-  searchResultHeaderText: {
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-  closeButton: {
-    color: '#2196F3',
-    fontWeight: 'bold',
-  },
-  searchResultItem: {
     padding: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
   },
-  searchResultText: {
+  panelHeaderText: {
+    fontWeight: 'bold',
     fontSize: 16,
+    color: '#333',
   },
-  searchResultCoords: {
-    fontSize: 12,
+  resultItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  resultIcon: {
+    marginRight: 10,
+  },
+  resultTextContainer: {
+    flex: 1,
+  },
+  resultName: {
+    fontSize: 15,
+    color: '#333',
+    fontWeight: '500',
+  },
+  resultCoords: {
+    fontSize: 13,
     color: '#666',
-    marginTop: 4,
+    marginTop: 2,
+  },
+  emptyResultsContainer: {
+    padding: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyResultsText: {
+    fontSize: 15,
+    color: '#666',
+    marginTop: 10,
   },
   mapContainer: {
-    height: 300,
+    height: 350,
     borderRadius: 10,
     overflow: 'hidden',
     marginBottom: 16,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
   },
   map: {
     ...StyleSheet.absoluteFillObject,
@@ -410,77 +528,124 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   instructionContainer: {
-    backgroundColor: '#f8f8f8',
+    backgroundColor: '#fff',
     padding: 12,
     borderRadius: 8,
     marginBottom: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    elevation: 1,
+  },
+  instructionIcon: {
+    marginRight: 8,
   },
   instructionText: {
+    flex: 1,
     fontSize: 14,
     color: '#666',
-    textAlign: 'center',
+    lineHeight: 20,
   },
   buttonContainer: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     marginBottom: 16,
   },
   button: {
     flex: 1,
-    backgroundColor: '#4CAF50',
-    paddingVertical: 12,
+    backgroundColor: '#2196F3',
+    padding: 14,
     borderRadius: 8,
     alignItems: 'center',
     marginHorizontal: 4,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    elevation: 2,
+  },
+  buttonIcon: {
+    marginRight: 8,
   },
   buttonDisabled: {
-    backgroundColor: '#A5D6A7',
+    backgroundColor: '#B0BEC5',
   },
   cancelButton: {
-    backgroundColor: '#F44336',
+    backgroundColor: '#FF5722',
   },
   buttonText: {
     color: 'white',
     fontWeight: 'bold',
-    fontSize: 16,
+    fontSize: 15,
   },
   coordinatesContainer: {
-    backgroundColor: '#f8f8f8',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
     padding: 12,
     borderRadius: 8,
-    alignItems: 'center',
+    elevation: 1,
+  },
+  coordsIcon: {
+    marginRight: 8,
   },
   coordinatesText: {
-    fontSize: 12,
+    fontSize: 13,
     color: '#666',
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
   modalContent: {
+    width: '85%',
     backgroundColor: 'white',
     borderRadius: 10,
     padding: 20,
-    width: '100%',
-    maxWidth: 400,
+    elevation: 5,
   },
   modalTitle: {
     fontSize: 18,
     fontWeight: 'bold',
+    color: '#333',
     marginBottom: 16,
     textAlign: 'center',
   },
   nameInput: {
+    height: 45,
     borderWidth: 1,
     borderColor: '#ddd',
     borderRadius: 8,
-    padding: 12,
-    marginBottom: 16,
+    paddingHorizontal: 12,
     fontSize: 16,
+    marginBottom: 16,
+  },
+  checkboxContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: '#2196F3',
+    marginRight: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxInner: {
+    width: 18,
+    height: 18,
+    borderRadius: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: '#2196F3',
+  },
+  checkboxLabel: {
+    fontSize: 15,
+    color: '#333',
   },
   modalButtons: {
     flexDirection: 'row',
@@ -488,16 +653,26 @@ const styles = StyleSheet.create({
   },
   modalButton: {
     flex: 1,
-    paddingVertical: 12,
+    height: 45,
     borderRadius: 8,
+    justifyContent: 'center',
     alignItems: 'center',
-    marginHorizontal: 4,
   },
   cancelModalButton: {
-    backgroundColor: '#F44336',
+    backgroundColor: '#f5f5f5',
+    marginRight: 8,
   },
   saveModalButton: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: '#2196F3',
+    marginLeft: 8,
+  },
+  cancelButtonText: {
+    color: '#666',
+    fontWeight: 'bold',
+  },
+  saveButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
   },
 });
 

@@ -2,6 +2,7 @@ import * as Location from 'expo-location';
 import { Alert } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { Audio } from 'expo-av';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 class LocationService {
   constructor() {
@@ -27,6 +28,126 @@ class LocationService {
     
     // Keep track of last notification distance to prevent duplicate notifications
     this.lastNotificationDistance = null;
+
+    // Saved locations
+    this.savedLocations = [];
+    
+    // Trip history
+    this.tripHistory = [];
+    
+    // Load saved data
+    this._initializeData();
+  }
+
+  // Initialize data with better error handling
+  async _initializeData() {
+    try {
+      await this.loadSavedData();
+      console.log('LocationService initialized successfully');
+    } catch (error) {
+      console.error('Error initializing LocationService:', error);
+      // Use default values if loading fails
+      this.savedLocations = [];
+      this.tripHistory = [];
+    }
+  }
+
+  // Save all persistent data
+  async saveData() {
+    try {
+      const dataToSave = {
+        savedLocations: this.savedLocations,
+        tripHistory: this.tripHistory,
+        notificationThresholds: this.notificationThresholds,
+        alarmEnabled: this.alarmEnabled,
+        alarmDistance: this.alarmDistance
+      };
+      
+      await AsyncStorage.setItem('locationServiceData', JSON.stringify(dataToSave));
+      console.log('Data saved successfully');
+    } catch (error) {
+      console.error('Error saving data:', error);
+      // Avoid crashing the app, just log the error
+    }
+  }
+
+  // Load saved data with better error handling
+  async loadSavedData() {
+    try {
+      const savedData = await AsyncStorage.getItem('locationServiceData');
+      
+      if (savedData) {
+        const parsedData = JSON.parse(savedData);
+        
+        if (parsedData.savedLocations) this.savedLocations = parsedData.savedLocations;
+        if (parsedData.tripHistory) this.tripHistory = parsedData.tripHistory;
+        if (parsedData.notificationThresholds) this.notificationThresholds = parsedData.notificationThresholds;
+        if (parsedData.alarmEnabled !== undefined) this.alarmEnabled = parsedData.alarmEnabled;
+        if (parsedData.alarmDistance !== undefined) this.alarmDistance = parsedData.alarmDistance;
+        
+        console.log('Loaded saved data:', { 
+          locationsCount: this.savedLocations.length,
+          tripsCount: this.tripHistory.length
+        });
+      }
+    } catch (error) {
+      console.error('Error loading saved data:', error);
+      throw error; // Re-throw to be handled by _initializeData
+    }
+  }
+
+  // Save a location to favorites
+  async saveLocation(location, name) {
+    const newLocation = {
+      id: Date.now().toString(),
+      name: name || 'Saved Location',
+      latitude: location.latitude,
+      longitude: location.longitude,
+      timestamp: new Date().toISOString()
+    };
+    
+    this.savedLocations = [...this.savedLocations, newLocation];
+    await this.saveData();
+    return newLocation;
+  }
+
+  // Remove a location from favorites
+  async removeSavedLocation(locationId) {
+    this.savedLocations = this.savedLocations.filter(loc => loc.id !== locationId);
+    await this.saveData();
+  }
+
+  // Get all saved locations
+  getSavedLocations() {
+    return this.savedLocations;
+  }
+
+  // Add to trip history
+  async addToTripHistory(destination, startTime, endTime, completed = true) {
+    const trip = {
+      id: Date.now().toString(),
+      destinationName: destination.name,
+      latitude: destination.latitude,
+      longitude: destination.longitude,
+      startTime: startTime || new Date().toISOString(),
+      endTime: endTime || new Date().toISOString(),
+      completed: completed
+    };
+    
+    this.tripHistory = [trip, ...this.tripHistory].slice(0, 20); // Keep only last 20 trips
+    await this.saveData();
+    return trip;
+  }
+
+  // Get trip history
+  getTripHistory() {
+    return this.tripHistory;
+  }
+
+  // Clear trip history
+  async clearTripHistory() {
+    this.tripHistory = [];
+    await this.saveData();
   }
 
   async requestPermissions() {
@@ -57,7 +178,52 @@ class LocationService {
     this.destinationName = name;
     this.lastNotificationDistance = null; // Reset notification tracking
     this.stopAlarm(); // Stop any playing alarm
+    this.tripStartTime = new Date().toISOString(); // Record trip start time
     return this.destinationLocation;
+  }
+
+  async clearDestination() {
+    // If we had a destination, add to trip history before clearing
+    if (this.destinationLocation) {
+      await this.addToTripHistory(
+        {
+          name: this.destinationName,
+          latitude: this.destinationLocation.latitude,
+          longitude: this.destinationLocation.longitude
+        },
+        this.tripStartTime,
+        new Date().toISOString(),
+        false // Mark as incomplete if manually cleared
+      );
+    }
+    
+    this.destinationLocation = null;
+    this.destinationName = "Selected Destination"; // Reset to default name
+    this.lastNotificationDistance = null; // Reset notification tracking
+    this.stopAlarm(); // Stop any playing alarm
+    return null;
+  }
+
+  async markDestinationReached() {
+    // Add completed trip to history
+    if (this.destinationLocation) {
+      await this.addToTripHistory(
+        {
+          name: this.destinationName,
+          latitude: this.destinationLocation.latitude,
+          longitude: this.destinationLocation.longitude
+        },
+        this.tripStartTime,
+        new Date().toISOString(),
+        true // Mark as completed
+      );
+    }
+    
+    this.destinationLocation = null;
+    this.destinationName = "Selected Destination";
+    this.lastNotificationDistance = null;
+    this.stopAlarm();
+    return null;
   }
 
   calculateDistance(lat1, lon1, lat2, lon2) {
